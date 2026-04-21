@@ -6,7 +6,7 @@ COPY client/package*.json ./client/
 COPY server/package*.json ./server/
 RUN npm install
 COPY . .
-RUN npm run build
+RUN cd client && npx vite build && cd ../server && npx tsc
 
 FROM node:22-alpine
 WORKDIR /app
