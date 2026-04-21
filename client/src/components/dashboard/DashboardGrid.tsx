@@ -7,9 +7,16 @@ import type { WidgetConfig } from '../../types';
 import WidgetWrapper from './WidgetWrapper';
 import { useContainerWidth } from '../../hooks/useContainerWidth';
 
+// Heights (in rows * rowHeight px) to use when stacking on mobile
+const MOBILE_HEIGHTS: Record<string, number> = {
+  clock: 80, weather: 200, calendar: 320, meals: 200, tasks: 260, grocery: 200, chores: 200,
+};
+
 export default function DashboardGrid() {
   const { layout, setLayout, isEditing } = useDashboardStore();
   const { ref, width } = useContainerWidth();
+
+  const isMobile = width > 0 && width < 640;
 
   const handleLayoutChange = useCallback(
     (newLayout: Layout[]) => {
@@ -37,6 +44,22 @@ export default function DashboardGrid() {
     isDraggable: isEditing,
     isResizable: isEditing,
   }));
+
+  if (isMobile) {
+    return (
+      <div ref={ref} className="w-full h-full overflow-auto p-3 space-y-3 pb-20">
+        {layout.map(widget => (
+          <div
+            key={widget.i}
+            style={{ height: MOBILE_HEIGHTS[widget.type] ?? 200 }}
+            className="w-full overflow-hidden rounded-xl"
+          >
+            <WidgetWrapper config={widget} />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div ref={ref} className="w-full h-full overflow-auto">
