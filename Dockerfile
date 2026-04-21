@@ -1,5 +1,6 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
+RUN apk add --no-cache python3 make g++
 COPY package*.json ./
 COPY client/package*.json ./client/
 COPY server/package*.json ./server/
@@ -9,6 +10,7 @@ RUN npm run build
 
 FROM node:22-alpine
 WORKDIR /app
+RUN apk add --no-cache python3 make g++
 COPY --from=builder /app/server/dist ./server/dist
 COPY --from=builder /app/client/dist ./public
 COPY --from=builder /app/server/package*.json ./server/
