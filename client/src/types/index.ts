@@ -14,6 +14,8 @@ export interface CalDAVEvent {
   start: string;
   end: string;
   allDay: boolean;
+  rrule?: string;
+  color?: string;
   icalString?: string;
 }
 
@@ -28,6 +30,7 @@ export interface CalDAVTodo {
   due?: string;
   categories?: string;
   assignee?: string;
+  rrule?: string;
   icalString?: string;
 }
 

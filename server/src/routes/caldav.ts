@@ -92,10 +92,70 @@ function parseICalEvent(icalStr: string): Record<string, unknown> | null {
       start: ev.startDate?.toJSDate()?.toISOString(),
       end: ev.endDate?.toJSDate()?.toISOString(),
       allDay: ev.startDate?.isDate ?? false,
+      color: vevent.getFirstPropertyValue('x-family-hub-color') ?? undefined,
       icalString: icalStr,
     };
   } catch {
     return null;
+  }
+}
+
+function parseAndExpandEvents(
+  icalStr: string,
+  rangeStart: Date,
+  rangeEnd: Date,
+): Record<string, unknown>[] {
+  try {
+    const jcal = ICAL.parse(icalStr);
+    const comp = new ICAL.Component(jcal);
+    const vevent = comp.getFirstSubcomponent('vevent');
+    if (!vevent) return [];
+    const ev = new ICAL.Event(vevent);
+
+    const base = {
+      uid: ev.uid,
+      summary: ev.summary,
+      description: ev.description,
+      location: ev.location,
+      allDay: ev.startDate?.isDate ?? false,
+      color: vevent.getFirstPropertyValue('x-family-hub-color') ?? undefined,
+      icalString: icalStr,
+    };
+
+    if (!ev.isRecurring()) {
+      return [{ ...base, start: ev.startDate?.toJSDate()?.toISOString(), end: ev.endDate?.toJSDate()?.toISOString() }];
+    }
+
+    // Expand recurring occurrences within the requested range
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ICALany = ICAL as any;
+    const startIcal = ICALany.Time.fromJSDate(rangeStart, false);
+    const endIcal = ICALany.Time.fromJSDate(rangeEnd, false);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const iter = (ev as any).iterator();
+    const results: Record<string, unknown>[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let next: any;
+    let safety = 0;
+
+    while ((next = iter.next()) && ++safety < 1000) {
+      if (next.compare(endIcal) >= 0) break;
+      if (next.compare(startIcal) >= 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const details = (ev as any).getOccurrenceDetails(next);
+        results.push({
+          ...base,
+          uid: `${ev.uid}_${next.toString()}`,
+          summary: details.item.summary || ev.summary,
+          start: details.startDate.toJSDate().toISOString(),
+          end: details.endDate.toJSDate().toISOString(),
+        });
+      }
+    }
+
+    return results;
+  } catch {
+    return [];
   }
 }
 
@@ -129,6 +189,8 @@ function buildVEvent(data: {
   start: string;
   end: string;
   allDay?: boolean;
+  rrule?: string;
+  color?: string;
 }): string {
   const uid = data.uid ?? uuidv4();
   const now = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15) + 'Z';
@@ -159,8 +221,10 @@ function buildVEvent(data: {
     allDay ? `DTSTART;VALUE=DATE:${fmt(data.start, true)}` : `DTSTART:${fmt(data.start, false)}`,
     allDay ? `DTEND;VALUE=DATE:${endDate.replace(/-/g, '')}` : `DTEND:${endIso.replace(/[-:.]/g, '').slice(0, 15) + 'Z'}`,
     `SUMMARY:${data.summary}`,
+    data.rrule ? `RRULE:${data.rrule}` : '',
     data.description ? `DESCRIPTION:${data.description.replace(/\n/g, '\\n')}` : '',
     data.location ? `LOCATION:${data.location}` : '',
+    data.color ? `X-FAMILY-HUB-COLOR:${data.color}` : '',
     'END:VEVENT',
     'END:VCALENDAR',
   ]
@@ -178,6 +242,7 @@ function buildVTodo(data: {
   priority?: number;
   assignee?: string;
   categories?: string;
+  rrule?: string;
 }): string {
   const uid = data.uid ?? uuidv4();
   const now = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15) + 'Z';
@@ -198,6 +263,7 @@ function buildVTodo(data: {
     `UID:${uid}`,
     `DTSTAMP:${now}`,
     `SUMMARY:${data.summary}`,
+    data.rrule ? `RRULE:${data.rrule}` : '',
     data.description ? `DESCRIPTION:${data.description.replace(/\n/g, '\\n')}` : '',
     data.due ? fmtDue(data.due) : '',
     data.status ? `STATUS:${data.status.toUpperCase()}` : 'STATUS:NEEDS-ACTION',
@@ -291,9 +357,12 @@ router.get('/events', async (req: Request, res: Response) => {
     });
 
     const objects = parseCalendarObjects(response.data as string);
-    const events = objects
-      .map(o => ({ ...parseICalEvent(o.data), href: o.href, etag: o.etag }))
-      .filter(Boolean);
+    const rangeStartDate = new Date(start);
+    const rangeEndDate = new Date(end);
+    const events = objects.flatMap(o => {
+      const expanded = parseAndExpandEvents(o.data, rangeStartDate, rangeEndDate);
+      return expanded.map(ev => ({ ...ev, href: o.href, etag: o.etag }));
+    }).filter(Boolean);
 
     res.json({ success: true, data: events });
   } catch (err) {

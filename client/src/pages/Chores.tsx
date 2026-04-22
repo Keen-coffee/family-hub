@@ -12,9 +12,26 @@ interface ChoreForm {
   assignee: string;
   due: string;
   categories: string;
+  freq: '' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+  byDay: string[];
+  endType: 'never' | 'count' | 'until';
+  count: string;
+  until: string;
 }
 
-const EMPTY_FORM: ChoreForm = { summary: '', description: '', assignee: '', due: '', categories: '' };
+const EMPTY_FORM: ChoreForm = { summary: '', description: '', assignee: '', due: '', categories: '', freq: '', byDay: [], endType: 'never', count: '', until: '' };
+
+const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+function buildRRule(f: ChoreForm): string | undefined {
+  if (!f.freq) return undefined;
+  let rule = `FREQ=${f.freq}`;
+  if (f.freq === 'WEEKLY' && f.byDay.length > 0) rule += `;BYDAY=${f.byDay.join(',')}`;
+  if (f.endType === 'count' && Number(f.count) > 0) rule += `;COUNT=${Number(f.count)}`;
+  if (f.endType === 'until' && f.until) rule += `;UNTIL=${f.until.replace(/-/g, '')}T000000Z`;
+  return rule;
+}
 
 export default function ChoresPage() {
   const [showAdd, setShowAdd] = useState(false);
@@ -54,6 +71,7 @@ export default function ChoresPage() {
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     setChoreError(null);
+    const rrule = buildRRule(formData);
     createChore({
       summary: formData.summary,
       description: formData.description,
@@ -61,6 +79,7 @@ export default function ChoresPage() {
       due: formData.due || undefined,
       categories: formData.categories || undefined,
       status: 'NEEDS-ACTION',
+      ...(rrule ? { rrule } : {}),
     }, {
       onSuccess: () => { setFormData(EMPTY_FORM); setShowAdd(false); },
       onError: (err: unknown) => {
@@ -263,6 +282,82 @@ export default function ChoresPage() {
               className="w-full bg-surface-raised border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-accent resize-none"
             />
           </div>
+
+          {/* Recurrence */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <label className="text-xs font-medium text-slate-400 w-14 shrink-0">Repeat</label>
+              <select
+                value={formData.freq}
+                onChange={e => setFormData(f => ({ ...f, freq: e.target.value as ChoreForm['freq'], byDay: [], endType: 'never', count: '', until: '' }))}
+                className="flex-1 bg-surface-raised border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-accent"
+              >
+                <option value="">Does not repeat</option>
+                <option value="DAILY">Daily</option>
+                <option value="WEEKLY">Weekly</option>
+                <option value="MONTHLY">Monthly</option>
+                <option value="YEARLY">Yearly</option>
+              </select>
+            </div>
+
+            {formData.freq === 'WEEKLY' && (
+              <div className="flex items-center gap-2 pl-[74px]">
+                {WEEKDAYS.map((d, i) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setFormData(f => ({
+                      ...f,
+                      byDay: f.byDay.includes(d) ? f.byDay.filter(x => x !== d) : [...f.byDay, d],
+                    }))}
+                    className={`w-7 h-7 rounded-full text-[10px] font-semibold transition-colors ${
+                      formData.byDay.includes(d)
+                        ? 'bg-accent text-white'
+                        : 'bg-surface-raised text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {WEEKDAY_LABELS[i]}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {formData.freq && (
+              <div className="pl-[74px] space-y-1.5">
+                <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wide">Ends</p>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="choreEndType" value="never" checked={formData.endType === 'never'} onChange={() => setFormData(f => ({ ...f, endType: 'never' }))} className="accent-accent" />
+                  <span className="text-xs text-slate-300">Never</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="choreEndType" value="count" checked={formData.endType === 'count'} onChange={() => setFormData(f => ({ ...f, endType: 'count' }))} className="accent-accent" />
+                  <span className="text-xs text-slate-300">After</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={formData.count}
+                    onFocus={() => setFormData(f => ({ ...f, endType: 'count' }))}
+                    onChange={e => setFormData(f => ({ ...f, endType: 'count', count: e.target.value }))}
+                    className="w-16 bg-surface-raised border border-slate-600 rounded px-2 py-0.5 text-xs text-slate-100 focus:outline-none focus:border-accent"
+                    placeholder="10"
+                  />
+                  <span className="text-xs text-slate-300">occurrences</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="choreEndType" value="until" checked={formData.endType === 'until'} onChange={() => setFormData(f => ({ ...f, endType: 'until' }))} className="accent-accent" />
+                  <span className="text-xs text-slate-300">On date</span>
+                  <input
+                    type="date"
+                    value={formData.until}
+                    onFocus={() => setFormData(f => ({ ...f, endType: 'until' }))}
+                    onChange={e => setFormData(f => ({ ...f, endType: 'until', until: e.target.value }))}
+                    className="bg-surface-raised border border-slate-600 rounded px-2 py-0.5 text-xs text-slate-100 focus:outline-none focus:border-accent"
+                  />
+                </label>
+              </div>
+            )}
+          </div>
+
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 hover:bg-surface-raised rounded-lg">Cancel</button>
             <button type="submit" className="px-4 py-2 text-xs bg-accent hover:bg-accent-hover text-white rounded-lg">Add Chore</button>

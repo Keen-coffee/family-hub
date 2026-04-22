@@ -12,9 +12,19 @@ import LoadingSpinner from '../components/common/LoadingSpinner';
 import type { CalDAVEvent } from '../types';
 
 const EVENT_COLORS = ['bg-blue-500', 'bg-emerald-500', 'bg-violet-500', 'bg-amber-500', 'bg-rose-500'];
-function colorFor(uid: string) {
+const COLOR_OPTIONS: { label: string; value: string }[] = [
+  { label: 'Blue',   value: 'bg-blue-500' },
+  { label: 'Green',  value: 'bg-emerald-500' },
+  { label: 'Purple', value: 'bg-violet-500' },
+  { label: 'Orange', value: 'bg-amber-500' },
+  { label: 'Red',    value: 'bg-rose-500' },
+];
+function colorFor(uid: string, color?: string) {
+  if (color) return color;
+  // Strip occurrence suffix added for recurring events (e.g. "uid_2026-04-28T10:00:00Z")
+  const baseUid = uid.replace(/_\d{4}-\d{2}-\d{2}T[\d:Z]+$/, '');
   let h = 0;
-  for (const c of uid) h = (h * 31 + c.charCodeAt(0)) | 0;
+  for (const c of baseUid) h = (h * 31 + c.charCodeAt(0)) | 0;
   return EVENT_COLORS[Math.abs(h) % EVENT_COLORS.length];
 }
 
@@ -25,11 +35,31 @@ interface EventFormData {
   allDay: boolean;
   description: string;
   location: string;
+  color: string;
+  freq: '' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+  byDay: string[];
+  endType: 'never' | 'count' | 'until';
+  count: string;
+  until: string;
 }
 
 const EMPTY_FORM: EventFormData = {
   summary: '', start: '', end: '', allDay: false, description: '', location: '',
+  color: '',
+  freq: '', byDay: [], endType: 'never', count: '', until: '',
 };
+
+const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+function buildRRule(f: EventFormData): string | undefined {
+  if (!f.freq) return undefined;
+  let rule = `FREQ=${f.freq}`;
+  if (f.freq === 'WEEKLY' && f.byDay.length > 0) rule += `;BYDAY=${f.byDay.join(',')}`;
+  if (f.endType === 'count' && Number(f.count) > 0) rule += `;COUNT=${Number(f.count)}`;
+  if (f.endType === 'until' && f.until) rule += `;UNTIL=${f.until.replace(/-/g, '')}T000000Z`;
+  return rule;
+}
 
 export default function CalendarPage() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -66,6 +96,7 @@ export default function CalendarPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setCreateError(null);
+    const rrule = buildRRule(formData);
     createEvent(
       {
         calendarHref,
@@ -76,7 +107,9 @@ export default function CalendarPage() {
           allDay: formData.allDay,
           description: formData.description,
           location: formData.location,
-        },
+          ...(formData.color ? { color: formData.color } : {}),
+          ...(rrule ? { rrule } : {}),
+        } as Parameters<typeof createEvent>[0]['event'],
       },
       {
         onSuccess: () => { setShowForm(false); setFormData(EMPTY_FORM); },
@@ -162,7 +195,7 @@ export default function CalendarPage() {
                       <div
                         key={ev.uid}
                         onClick={e => { e.stopPropagation(); setSelectedEvent(ev); }}
-                        className={`text-[9px] text-white px-1 py-0.5 rounded truncate cursor-pointer hover:brightness-110 ${colorFor(ev.uid)}`}
+                        className={`text-[9px] text-white px-1 py-0.5 rounded truncate cursor-pointer hover:brightness-110 ${colorFor(ev.uid, ev.color)}`}
                       >
                         {ev.summary}
                       </div>
@@ -177,7 +210,7 @@ export default function CalendarPage() {
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
                     )}
                     {dayEvents.slice(0, 3).map(ev => (
-                      <span key={ev.uid} className={`w-1.5 h-1.5 rounded-full inline-block ${colorFor(ev.uid)}`} />
+                      <span key={ev.uid} className={`w-1.5 h-1.5 rounded-full inline-block ${colorFor(ev.uid, ev.color)}`} />
                     ))}
                   </div>
                 </div>
@@ -212,7 +245,7 @@ export default function CalendarPage() {
                       className="px-3 py-2 hover:bg-surface-raised cursor-pointer border-l-2 border-transparent hover:border-accent transition-colors mb-1 mx-2 rounded-r-lg"
                     >
                       <div className="flex items-center gap-1.5">
-                        <div className={`w-2 h-2 rounded-full shrink-0 ${colorFor(ev.uid)}`} />
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${colorFor(ev.uid, ev.color)}`} />
                         <p className="text-xs font-medium text-slate-200 truncate">{ev.summary}</p>
                       </div>
                       {!ev.allDay && (
@@ -244,7 +277,7 @@ export default function CalendarPage() {
                   ))}
                   {selectedDayEvents.map(ev => (
                     <div key={ev.uid} onClick={() => setSelectedEvent(ev)} className="flex items-center gap-2 px-3 py-1.5 active:bg-surface-raised">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${colorFor(ev.uid)}`} />
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${colorFor(ev.uid, ev.color)}`} />
                       <p className="text-xs text-slate-200 flex-1 truncate">{ev.summary}</p>
                       {!ev.allDay && <p className="text-[10px] text-slate-500 shrink-0">{format(parseISO(ev.start), 'h:mm a')}</p>}
                     </div>
@@ -273,6 +306,30 @@ export default function CalendarPage() {
               className="w-full bg-surface-raised border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-accent"
               placeholder="Event title"
             />
+          </div>
+          {/* Color picker */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400 w-10 shrink-0">Color</span>
+            <div className="flex gap-2">
+              {COLOR_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  title={opt.label}
+                  onClick={() => setFormData(f => ({ ...f, color: f.color === opt.value ? '' : opt.value }))}
+                  className={`w-6 h-6 rounded-full ${opt.value} transition-all ${
+                    formData.color === opt.value
+                      ? 'ring-2 ring-offset-2 ring-offset-surface ring-white scale-110'
+                      : 'opacity-70 hover:opacity-100'
+                  }`}
+                />
+              ))}
+            </div>
+            {formData.color && (
+              <button type="button" onClick={() => setFormData(f => ({ ...f, color: '' }))} className="text-[10px] text-slate-500 hover:text-slate-300 ml-1">
+                auto
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <input
@@ -321,6 +378,81 @@ export default function CalendarPage() {
               onChange={e => setFormData(f => ({ ...f, description: e.target.value }))}
               className="w-full bg-surface-raised border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-accent resize-none"
             />
+          </div>
+
+          {/* Recurrence */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <label className="text-xs font-medium text-slate-400 w-14 shrink-0">Repeat</label>
+              <select
+                value={formData.freq}
+                onChange={e => setFormData(f => ({ ...f, freq: e.target.value as EventFormData['freq'], byDay: [], endType: 'never', count: '', until: '' }))}
+                className="flex-1 bg-surface-raised border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-accent"
+              >
+                <option value="">Does not repeat</option>
+                <option value="DAILY">Daily</option>
+                <option value="WEEKLY">Weekly</option>
+                <option value="MONTHLY">Monthly</option>
+                <option value="YEARLY">Yearly</option>
+              </select>
+            </div>
+
+            {formData.freq === 'WEEKLY' && (
+              <div className="flex items-center gap-2 pl-[74px]">
+                {WEEKDAYS.map((d, i) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setFormData(f => ({
+                      ...f,
+                      byDay: f.byDay.includes(d) ? f.byDay.filter(x => x !== d) : [...f.byDay, d],
+                    }))}
+                    className={`w-7 h-7 rounded-full text-[10px] font-semibold transition-colors ${
+                      formData.byDay.includes(d)
+                        ? 'bg-accent text-white'
+                        : 'bg-surface-raised text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {WEEKDAY_LABELS[i]}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {formData.freq && (
+              <div className="pl-[74px] space-y-1.5">
+                <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wide">Ends</p>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="endType" value="never" checked={formData.endType === 'never'} onChange={() => setFormData(f => ({ ...f, endType: 'never' }))} className="accent-accent" />
+                  <span className="text-xs text-slate-300">Never</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="endType" value="count" checked={formData.endType === 'count'} onChange={() => setFormData(f => ({ ...f, endType: 'count' }))} className="accent-accent" />
+                  <span className="text-xs text-slate-300">After</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={formData.count}
+                    onFocus={() => setFormData(f => ({ ...f, endType: 'count' }))}
+                    onChange={e => setFormData(f => ({ ...f, endType: 'count', count: e.target.value }))}
+                    className="w-16 bg-surface-raised border border-slate-600 rounded px-2 py-0.5 text-xs text-slate-100 focus:outline-none focus:border-accent"
+                    placeholder="10"
+                  />
+                  <span className="text-xs text-slate-300">occurrences</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="endType" value="until" checked={formData.endType === 'until'} onChange={() => setFormData(f => ({ ...f, endType: 'until' }))} className="accent-accent" />
+                  <span className="text-xs text-slate-300">On date</span>
+                  <input
+                    type="date"
+                    value={formData.until}
+                    onFocus={() => setFormData(f => ({ ...f, endType: 'until' }))}
+                    onChange={e => setFormData(f => ({ ...f, endType: 'until', until: e.target.value }))}
+                    className="bg-surface-raised border border-slate-600 rounded px-2 py-0.5 text-xs text-slate-100 focus:outline-none focus:border-accent"
+                  />
+                </label>
+              </div>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 hover:bg-surface-raised rounded-lg transition-colors">
