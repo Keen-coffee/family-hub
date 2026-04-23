@@ -7,6 +7,19 @@ interface Props {
   onClose: () => void;
 }
 
+/** iOS zooms the viewport when a camera stream starts and never resets it.
+ *  Briefly forcing maximum-scale=1 snaps it back. */
+function resetIOSViewportZoom() {
+  const meta = document.querySelector('meta[name=viewport]') as HTMLMetaElement | null;
+  if (!meta) return;
+  const original = meta.content;
+  meta.content = original + ', maximum-scale=1';
+  // Restore after next frame so iOS applies the constraint then removes it
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => { meta.content = original; });
+  });
+}
+
 export default function BarcodeScanner({ onScan, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
@@ -28,6 +41,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
             if (result && !calledRef.current) {
               calledRef.current = true;
               controls.stop();
+              resetIOSViewportZoom();
               onScan(result.getText());
             }
           },
@@ -65,7 +79,7 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
             <Camera className="w-4 h-4 text-accent" />
             <span className="text-sm font-semibold text-slate-200">Scan Barcode</span>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-surface-raised text-slate-400 hover:text-slate-200">
+          <button onClick={() => { resetIOSViewportZoom(); onClose(); }} className="p-1 rounded-lg hover:bg-surface-raised text-slate-400 hover:text-slate-200">
             <X className="w-4 h-4" />
           </button>
         </div>
