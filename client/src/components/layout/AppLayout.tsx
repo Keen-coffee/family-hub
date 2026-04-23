@@ -20,7 +20,7 @@ export default function AppLayout() {
   }, []);
 
   return (
-    <div className="flex h-screen bg-base overflow-hidden">
+    <div className="flex h-screen bg-base overflow-hidden pt-safe">
       {/* Desktop sidebar */}
       {!isMobile && <Sidebar />}
 
