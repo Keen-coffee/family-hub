@@ -122,7 +122,7 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-700/50 shrink-0">
         <CalIcon className="w-4 h-4 text-accent shrink-0" />

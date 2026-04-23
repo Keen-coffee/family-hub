@@ -25,7 +25,7 @@ export default function AppLayout() {
       {!isMobile && <Sidebar />}
 
       {/* Main content */}
-      <main className="flex-1 overflow-hidden flex flex-col md:pb-0 pb-16">
+      <main className="flex-1 min-h-0 overflow-hidden flex flex-col md:pb-0 pb-16">
         <Outlet />
       </main>
 

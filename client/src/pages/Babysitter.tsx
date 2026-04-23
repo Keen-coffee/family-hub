@@ -162,14 +162,14 @@ export default function BabysitterPage() {
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-700/50 shrink-0">
         <Baby className="w-5 h-5 text-accent" />
         <h1 className="text-base font-semibold text-slate-100 mr-auto">Babysitter</h1>
       </div>
 
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 min-h-0 overflow-auto p-4">
         <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
 
           {/* Emergency Contacts */}
