@@ -7,6 +7,19 @@ interface Props {
   onClose: () => void;
 }
 
+/** Tablets should default to the front camera (barcode is shown on screen),
+ *  phones default to rear. Detects iPad (classic + modern "Macintosh" UA),
+ *  and Android tablets via min screen dimension >= 600px. */
+function preferFrontCamera(): boolean {
+  const ua = navigator.userAgent;
+  if (/iPad/i.test(ua)) return true;
+  // Modern iPadOS reports as "Macintosh" with touch support
+  if (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) return true;
+  // Android tablets are typically >= 600dp on their short axis
+  if (/Android/i.test(ua) && Math.min(screen.width, screen.height) >= 600) return true;
+  return false;
+}
+
 /** iOS zooms the viewport when a camera stream starts and never resets it.
  *  Briefly forcing maximum-scale=1 snaps it back. */
 function resetIOSViewportZoom() {
@@ -33,8 +46,9 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
 
     (async () => {
       try {
-        const controls = await reader.decodeFromVideoDevice(
-          undefined,
+        const facingMode = preferFrontCamera() ? 'user' : 'environment';
+        const controls = await reader.decodeFromConstraints(
+          { video: { facingMode } },
           videoRef.current!,
           (result, err) => {
             if (cancelled) return;
