@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
+import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { X, Camera, Loader2 } from 'lucide-react';
 
 interface Props {
@@ -38,17 +39,33 @@ export default function BarcodeScanner({ onScan, onClose }: Props) {
   const controlsRef = useRef<IScannerControls | null>(null);
   const [status, setStatus] = useState<'starting' | 'scanning' | 'error'>('starting');
   const [errorMsg, setErrorMsg] = useState('');
+  const [mirrored, setMirrored] = useState(false);
   const calledRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
-    const reader = new BrowserMultiFormatReader();
+    const hints = new Map<DecodeHintType, unknown>();
+    hints.set(DecodeHintType.TRY_HARDER, true);
+    hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+      BarcodeFormat.EAN_13,
+      BarcodeFormat.EAN_8,
+      BarcodeFormat.UPC_A,
+      BarcodeFormat.UPC_E,
+      BarcodeFormat.CODE_128,
+      BarcodeFormat.CODE_39,
+      BarcodeFormat.QR_CODE,
+      BarcodeFormat.DATA_MATRIX,
+      BarcodeFormat.ITF,
+      BarcodeFormat.CODABAR,
+    ]);
+    const reader = new BrowserMultiFormatReader(hints);
 
     (async () => {
       try {
         const facingMode = preferFrontCamera() ? 'user' : 'environment';
+        setMirrored(facingMode === 'user');
         const controls = await reader.decodeFromConstraints(
-          { video: { facingMode } },
+          { video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } } },
           videoRef.current!,
           (result, err) => {
             if (cancelled) return;
