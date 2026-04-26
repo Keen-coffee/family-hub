@@ -7,6 +7,7 @@ import {
   Cookie, SprayCan, PawPrint, Fish, Egg, Coffee, Baby, Carrot, Flame, ShoppingBag,
   type LucideIcon,
 } from 'lucide-react';
+import MassImportModal from '../components/pantry/MassImportModal';
 
 // Named icon definitions for pantry sections
 const SECTION_ICON_LIST: { id: string; label: string; icon: LucideIcon; color: string }[] = [
@@ -162,6 +163,7 @@ export default function GroceryPage() {
   const [newShopUnit, setNewShopUnit] = useState('');
   const [showScannerFor, setShowScannerFor] = useState<'item' | 'shopping' | null>(null);
   const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [showMassImport, setShowMassImport] = useState(false);
 
   const handleOpenAddItem = (s: PantrySection) => { setTargetSection(s); setNewItemName(''); setNewItemQty(1); setNewItemUnit(''); setShowAddItem(true); };
 
@@ -205,6 +207,14 @@ export default function GroceryPage() {
   const handleCreateItem = () => { if (!targetSection || !newItemName.trim()) return; createItem({ section_id: targetSection.id, name: newItemName.trim(), quantity: newItemQty, unit: newItemUnit }); setShowAddItem(false); };
   const handleCreateShoppingItem = () => { if (!newShopName.trim()) return; createShoppingItem({ name: newShopName.trim(), quantity: newShopQty, unit: newShopUnit }); setNewShopName(''); setNewShopQty(1); setNewShopUnit(''); setShowAddShopping(false); };
 
+  const handleMassImport = async (sectionId: string, items: { name: string; quantity: number; unit: string }[]) => {
+    for (const item of items) {
+      await new Promise<void>((resolve) => {
+        createItem({ section_id: sectionId, name: item.name, quantity: item.quantity, unit: item.unit }, { onSettled: () => resolve() });
+      });
+    }
+  };
+
   const unchecked = shoppingItems.filter(i => !i.checked);
   const checked = shoppingItems.filter(i => i.checked);
 
@@ -226,7 +236,10 @@ export default function GroceryPage() {
 
       {tab === 'pantry' && (
         <div className="flex-1 min-h-0 overflow-y-auto p-4">
-          <div className="flex justify-end mb-3">
+          <div className="flex items-center justify-end gap-2 mb-3">
+            <button onClick={() => setShowMassImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-surface-raised hover:bg-slate-700 text-slate-300 border border-slate-600 rounded-lg">
+              <ScanLine className="w-3.5 h-3.5" /> Mass Import
+            </button>
             <button onClick={() => setShowAddSection(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-accent/10 hover:bg-accent/20 text-accent border border-accent/30 rounded-lg">
               <Plus className="w-3.5 h-3.5" /> Add Section
             </button>
@@ -455,6 +468,13 @@ export default function GroceryPage() {
           onClose={() => setShowScannerFor(null)}
         />
       )}
+
+      <MassImportModal
+        isOpen={showMassImport}
+        onClose={() => setShowMassImport(false)}
+        sections={sections}
+        onImport={handleMassImport}
+      />
     </div>
   );
 }
