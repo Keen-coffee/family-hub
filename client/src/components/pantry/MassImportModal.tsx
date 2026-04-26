@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ScanLine, Trash2, Loader2, CheckCircle, AlertTriangle, ArrowRight, X } from 'lucide-react';
+import { ScanLine, Loader2, CheckCircle, AlertTriangle, ArrowRight, X, Ban } from 'lucide-react';
 import Modal from '../common/Modal';
 import type { PantrySection } from '../../types';
 
@@ -24,7 +24,7 @@ interface ReviewItem {
   skip: boolean;
 }
 
-type Step = 'scan' | 'review' | 'done';
+type Step = 'scan' | 'looking' | 'review' | 'done';
 
 interface Props {
   isOpen: boolean;
@@ -33,11 +33,20 @@ interface Props {
   onImport: (sectionId: string, items: { name: string; quantity: number; unit: string }[]) => Promise<void>;
 }
 
+// OpenFoodFacts enforces 15 req/min per IP — space requests ~4.5 s apart.
+const OFF_DELAY_MS = 4500;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function buildDisplayName(r: LookupResult): string {
   if (!r.name) return '';
   return r.brand ? `${r.brand} ${r.name}` : r.name;
+}
+
+function secsRemaining(done: number, total: number): string {
+  const left = (total - done) * (OFF_DELAY_MS / 1000);
+  if (left < 60) return `~${Math.round(left)}s remaining`;
+  return `~${Math.round(left / 60)}m remaining`;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -48,7 +57,8 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
   const [scanned, setScanned] = useState<string[]>([]);
   const [barcodeInput, setBarcodeInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const [looking, setLooking] = useState(false);
+  const [lookupProgress, setLookupProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+  const cancelRef = useRef(false);
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const [importing, setImporting] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
@@ -69,11 +79,12 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
 
   // Reset on close
   const handleClose = useCallback(() => {
+    cancelRef.current = true;
     setStep('scan');
     setScanned([]);
     setBarcodeInput('');
     setReviewItems([]);
-    setLooking(false);
+    setLookupProgress({ current: 0, total: 0 });
     setImporting(false);
     setImportedCount(0);
     onClose();
@@ -93,32 +104,58 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
 
   const removeBarcode = (b: string) => setScanned(prev => prev.filter(x => x !== b));
 
-  // Process barcodes via batch API then move to review step
+  // Sequential lookup — one barcode at a time respecting the 15 req/min limit.
   const handleProcess = async () => {
     if (scanned.length === 0) return;
-    setLooking(true);
-    try {
-      const r = await fetch('/api/openfoodfacts/batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ barcodes: scanned }),
-      });
-      const data = await r.json() as { success: boolean; data?: LookupResult[] };
-      const results: LookupResult[] = data.success && data.data ? data.data : scanned.map(b => ({ barcode: b, found: false, name: null, brand: null, quantity: null }));
-      setReviewItems(results.map(res => ({
-        barcode: res.barcode,
-        name: buildDisplayName(res),
-        unit: '',
-        qty: 1,
-        found: res.found,
-        skip: false,
-      })));
-    } catch {
-      setReviewItems(scanned.map(b => ({ barcode: b, name: '', unit: '', qty: 1, found: false, skip: false })));
-    } finally {
-      setLooking(false);
+    cancelRef.current = false;
+    setLookupProgress({ current: 0, total: scanned.length });
+    setStep('looking');
+
+    const results: ReviewItem[] = [];
+
+    for (let i = 0; i < scanned.length; i++) {
+      if (cancelRef.current) break;
+
+      const barcode = scanned[i];
+      let reviewItem: ReviewItem = { barcode, name: '', unit: '', qty: 1, found: false, skip: false };
+
+      try {
+        const r = await fetch(`/api/openfoodfacts/${encodeURIComponent(barcode)}`);
+        const data = await r.json() as { success: boolean; data?: LookupResult };
+        if (data.success && data.data) {
+          const res = data.data;
+          reviewItem = {
+            barcode,
+            name: buildDisplayName(res),
+            unit: '',
+            qty: 1,
+            found: !!res.name,
+            skip: false,
+          };
+        }
+      } catch {
+        // keep defaults (found: false, name: '')
+      }
+
+      results.push(reviewItem);
+      setLookupProgress({ current: i + 1, total: scanned.length });
+
+      // Wait between requests — skip the delay after the last item.
+      if (i < scanned.length - 1 && !cancelRef.current) {
+        await new Promise(resolve => setTimeout(resolve, OFF_DELAY_MS));
+      }
+    }
+
+    if (!cancelRef.current) {
+      setReviewItems(results);
       setStep('review');
     }
+  };
+
+  const handleCancelLookup = () => {
+    cancelRef.current = true;
+    setStep('scan');
+    setLookupProgress({ current: 0, total: 0 });
   };
 
   const updateReviewItem = (barcode: string, patch: Partial<ReviewItem>) => {
@@ -144,21 +181,30 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
 
   const sectionName = sections.find(s => s.id === selectedSection)?.name ?? '';
 
+  const STEPS: Step[] = ['scan', 'looking', 'review', 'done'];
+  const STEP_LABELS: Record<Step, string> = { scan: 'Scan', looking: 'Lookup', review: 'Review', done: 'Done' };
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title="Mass Barcode Import" size="lg">
       {/* Step indicators */}
       <div className="flex items-center gap-1 px-5 pt-4 pb-2">
-        {(['scan', 'review', 'done'] as Step[]).map((s, i) => (
-          <React.Fragment key={s}>
-            <div className={`flex items-center gap-1.5 text-xs font-medium ${step === s ? 'text-accent' : i < ['scan', 'review', 'done'].indexOf(step) ? 'text-emerald-400' : 'text-slate-600'}`}>
-              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] border ${step === s ? 'border-accent bg-accent/10 text-accent' : i < ['scan', 'review', 'done'].indexOf(step) ? 'border-emerald-400 bg-emerald-400/10 text-emerald-400' : 'border-slate-700 text-slate-600'}`}>{i + 1}</span>
-              {s === 'scan' ? 'Scan' : s === 'review' ? 'Review' : 'Done'}
-            </div>
-            {i < 2 && <div className="flex-1 h-px bg-slate-700 mx-1" />}
-          </React.Fragment>
-        ))}
+        {(['scan', 'review', 'done'] as Step[]).map((s, i) => {
+          const idx = ['scan', 'review', 'done'].indexOf(step === 'looking' ? 'scan' : step);
+          const sIdx = i;
+          const active = (step === 'looking' && s === 'scan') || step === s;
+          const past = sIdx < idx;
+          return (
+            <React.Fragment key={s}>
+              <div className={`flex items-center gap-1.5 text-xs font-medium ${active ? 'text-accent' : past ? 'text-emerald-400' : 'text-slate-600'}`}>
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] border ${active ? 'border-accent bg-accent/10 text-accent' : past ? 'border-emerald-400 bg-emerald-400/10 text-emerald-400' : 'border-slate-700 text-slate-600'}`}>{i + 1}</span>
+                {STEP_LABELS[s]}
+              </div>
+              {i < 2 && <div className="flex-1 h-px bg-slate-700 mx-1" />}
+            </React.Fragment>
+          );
+        })}
       </div>
 
       {/* ── SCAN STEP ── */}
@@ -178,7 +224,7 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
 
           {/* Barcode input — USB scanners type + Enter */}
           <div>
-            <label className="text-xs text-slate-400 mb-1.5 block flex items-center gap-1.5">
+            <label className="text-xs text-slate-400 mb-1.5 flex items-center gap-1.5">
               <ScanLine className="w-3.5 h-3.5" /> Scan barcodes
             </label>
             <input
@@ -211,6 +257,11 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
                   </div>
                 ))}
               </div>
+              {scanned.length > 1 && (
+                <p className="mt-1.5 text-[11px] text-slate-600">
+                  Lookup will take ~{Math.round((scanned.length * OFF_DELAY_MS) / 1000)}s (rate-limited to 15 req/min by OpenFoodFacts)
+                </p>
+              )}
             </div>
           )}
 
@@ -218,13 +269,43 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
             <button onClick={handleClose} className="px-3 py-1.5 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
             <button
               onClick={handleProcess}
-              disabled={scanned.length === 0 || !selectedSection || looking}
+              disabled={scanned.length === 0 || !selectedSection}
               className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-accent hover:bg-accent/80 text-white rounded-lg disabled:opacity-40"
             >
-              {looking ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-              {looking ? 'Looking up…' : `Process ${scanned.length} item${scanned.length !== 1 ? 's' : ''}`}
+              <ArrowRight className="w-4 h-4" />
+              Process {scanned.length} item{scanned.length !== 1 ? 's' : ''}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ── LOOKING STEP ── */}
+      {step === 'looking' && (
+        <div className="p-8 flex flex-col items-center gap-5">
+          <Loader2 className="w-10 h-10 text-accent animate-spin" />
+          <div className="text-center">
+            <p className="text-slate-100 font-medium">
+              Looking up {lookupProgress.current} of {lookupProgress.total}…
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              {lookupProgress.current < lookupProgress.total
+                ? secsRemaining(lookupProgress.current, lookupProgress.total)
+                : 'Finishing up…'}
+            </p>
+          </div>
+          {/* Progress bar */}
+          <div className="w-full max-w-xs bg-slate-700 rounded-full h-1.5 overflow-hidden">
+            <div
+              className="h-full bg-accent rounded-full transition-all duration-500"
+              style={{ width: `${lookupProgress.total > 0 ? (lookupProgress.current / lookupProgress.total) * 100 : 0}%` }}
+            />
+          </div>
+          <button
+            onClick={handleCancelLookup}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-500 hover:text-red-400 border border-slate-700 hover:border-red-500/40 rounded-lg transition-colors"
+          >
+            <Ban className="w-3.5 h-3.5" /> Cancel lookup
+          </button>
         </div>
       )}
 
