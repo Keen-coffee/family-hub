@@ -75,12 +75,16 @@ export function initializeDatabase(): void {
     );
 
     CREATE TABLE IF NOT EXISTS pantry_items (
-      id         TEXT PRIMARY KEY,
-      section_id TEXT NOT NULL REFERENCES pantry_sections(id) ON DELETE CASCADE,
-      name       TEXT NOT NULL,
-      quantity   REAL NOT NULL DEFAULT 1,
-      unit       TEXT DEFAULT '',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id           TEXT PRIMARY KEY,
+      section_id   TEXT NOT NULL REFERENCES pantry_sections(id) ON DELETE CASCADE,
+      name         TEXT NOT NULL,
+      generic_name TEXT DEFAULT '',
+      brand        TEXT DEFAULT '',
+      quantity     REAL NOT NULL DEFAULT 1,
+      unit         TEXT DEFAULT '',
+      min_quantity REAL DEFAULT 0,
+      barcode      TEXT DEFAULT '',
+      created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE INDEX IF NOT EXISTS idx_pantry_items_section ON pantry_items(section_id);
@@ -153,6 +157,18 @@ export function initializeDatabase(): void {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // ── Migrations for existing databases ─────────────────────────────────────
+  const addColIfMissing = (table: string, column: string, def: string) => {
+    const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as any[]).map(r => r.name);
+    if (!cols.includes(column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+    }
+  };
+  addColIfMissing('pantry_items', 'generic_name', "TEXT DEFAULT ''");
+  addColIfMissing('pantry_items', 'brand',        "TEXT DEFAULT ''");
+  addColIfMissing('pantry_items', 'min_quantity',  'REAL DEFAULT 0');
+  addColIfMissing('pantry_items', 'barcode',       "TEXT DEFAULT ''");
 }
 
 export default db;

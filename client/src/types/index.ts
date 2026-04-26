@@ -72,8 +72,12 @@ export interface PantryItem {
   id: string;
   section_id: string;
   name: string;
+  generic_name: string;
+  brand: string;
   quantity: number;
   unit: string;
+  min_quantity: number;
+  barcode: string;
   created_at: string;
 }
 
@@ -190,6 +194,8 @@ export interface AppSettings {
   weather_lon: string;
   weather_units: 'imperial' | 'metric';
   family_members: string; // comma-separated
+  openrouter_api_key: string;
+  openrouter_model: string;
 }
 
 // ── API Response ──────────────────────────────────────────────────────────────

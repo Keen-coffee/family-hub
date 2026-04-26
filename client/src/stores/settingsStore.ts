@@ -14,6 +14,8 @@ const DEFAULTS: AppSettings = {
   weather_lon: '',
   weather_units: 'imperial',
   family_members: '',
+  openrouter_api_key: '',
+  openrouter_model: '',
 };
 
 interface SettingsState {

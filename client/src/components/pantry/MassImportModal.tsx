@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ScanLine, Loader2, CheckCircle, AlertTriangle, ArrowRight, X, Ban } from 'lucide-react';
+import { ScanLine, Loader2, CheckCircle, AlertTriangle, ArrowRight, X, Ban, Sparkles } from 'lucide-react';
 import Modal from '../common/Modal';
 import type { PantrySection } from '../../types';
 
@@ -15,13 +15,13 @@ interface LookupResult {
 
 interface ReviewItem {
   barcode: string;
-  /** Editable display name shown to user */
-  name: string;
+  generic_name: string;
+  brand: string;
   unit: string;
   qty: number;
   found: boolean;
-  /** Skip this item during import */
   skip: boolean;
+  aiParsed: boolean;
 }
 
 type Step = 'scan' | 'looking' | 'review' | 'done';
@@ -30,7 +30,7 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   sections: PantrySection[];
-  onImport: (sectionId: string, items: { name: string; quantity: number; unit: string }[]) => Promise<void>;
+  onImport: (sectionId: string, items: { name: string; generic_name: string; brand: string; barcode: string; quantity: number; unit: string }[]) => Promise<void>;
 }
 
 // OpenFoodFacts enforces 15 req/min per IP — space requests ~4.5 s apart.
@@ -38,9 +38,18 @@ const OFF_DELAY_MS = 4500;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function buildDisplayName(r: LookupResult): string {
-  if (!r.name) return '';
-  return r.brand ? `${r.brand} ${r.name}` : r.name;
+async function aiParseName(raw: string): Promise<{ generic_name: string; brand: string } | null> {
+  try {
+    const r = await fetch('/api/ai/parse-product-name', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: raw }),
+    });
+    const data = await r.json() as { success: boolean; data?: { generic_name: string; brand: string } };
+    return data.success && data.data ? data.data : null;
+  } catch {
+    return null;
+  }
 }
 
 function secsRemaining(done: number, total: number): string {
@@ -54,14 +63,15 @@ function secsRemaining(done: number, total: number): string {
 export default function MassImportModal({ isOpen, onClose, sections, onImport }: Props) {
   const [step, setStep] = useState<Step>('scan');
   const [selectedSection, setSelectedSection] = useState<string>('');
-  const [scanned, setScanned] = useState<string[]>([]);
+  const [scanned, setScanned] = useState<Record<string, number>>({});
   const [barcodeInput, setBarcodeInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const [lookupProgress, setLookupProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+  const [lookupProgress, setLookupProgress] = useState<{ current: number; total: number; label: string }>({ current: 0, total: 0, label: '' });
   const cancelRef = useRef(false);
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const [importing, setImporting] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
+  const [reParsingIdx, setReParsingIdx] = useState<number | null>(null);
 
   // Auto-select first section
   useEffect(() => {
@@ -81,10 +91,10 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
   const handleClose = useCallback(() => {
     cancelRef.current = true;
     setStep('scan');
-    setScanned([]);
+    setScanned({});
     setBarcodeInput('');
     setReviewItems([]);
-    setLookupProgress({ current: 0, total: 0 });
+    setLookupProgress({ current: 0, total: 0, label: '' });
     setImporting(false);
     setImportedCount(0);
     onClose();
@@ -96,52 +106,63 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
       e.preventDefault();
       const val = barcodeInput.trim();
       if (/^\d{6,14}$/.test(val)) {
-        setScanned(prev => prev.includes(val) ? prev : [...prev, val]);
+        setScanned(prev => ({ ...prev, [val]: (prev[val] ?? 0) + 1 }));
       }
       setBarcodeInput('');
     }
   };
 
-  const removeBarcode = (b: string) => setScanned(prev => prev.filter(x => x !== b));
+  const removeBarcode = (b: string) => setScanned(prev => { const { [b]: _, ...rest } = prev; return rest; });
 
   // Sequential lookup — one barcode at a time respecting the 15 req/min limit.
+  // After OFB returns a name, immediately calls AI to parse brand + generic.
   const handleProcess = async () => {
-    if (scanned.length === 0) return;
+    const barcodeList = Object.entries(scanned); // [barcode, count]
+    if (barcodeList.length === 0) return;
     cancelRef.current = false;
-    setLookupProgress({ current: 0, total: scanned.length });
+    setLookupProgress({ current: 0, total: barcodeList.length, label: 'Looking up product…' });
     setStep('looking');
 
     const results: ReviewItem[] = [];
 
-    for (let i = 0; i < scanned.length; i++) {
+    for (let i = 0; i < barcodeList.length; i++) {
       if (cancelRef.current) break;
 
-      const barcode = scanned[i];
-      let reviewItem: ReviewItem = { barcode, name: '', unit: '', qty: 1, found: false, skip: false };
+      const [barcode, count] = barcodeList[i];
+      let reviewItem: ReviewItem = { barcode, generic_name: '', brand: '', unit: '', qty: count, found: false, skip: false, aiParsed: false };
 
       try {
+        setLookupProgress({ current: i, total: barcodeList.length, label: 'Looking up barcode…' });
         const r = await fetch(`/api/openfoodfacts/${encodeURIComponent(barcode)}`);
         const data = await r.json() as { success: boolean; data?: LookupResult };
-        if (data.success && data.data) {
+        if (data.success && data.data && data.data.name) {
           const res = data.data;
+          const rawName = res.brand ? `${res.brand} ${res.name}` : res.name!;
+
+          // Try AI parse — runs in parallel with the delay below
+          setLookupProgress({ current: i, total: barcodeList.length, label: 'Parsing with AI…' });
+          const parsed = await aiParseName(rawName);
+
           reviewItem = {
             barcode,
-            name: buildDisplayName(res),
+            generic_name: parsed?.generic_name ?? rawName,
+            brand: parsed?.brand ?? (res.brand ?? ''),
             unit: '',
-            qty: 1,
-            found: !!res.name,
+            qty: count,
+            found: true,
             skip: false,
+            aiParsed: !!parsed,
           };
         }
       } catch {
-        // keep defaults (found: false, name: '')
+        // keep defaults
       }
 
       results.push(reviewItem);
-      setLookupProgress({ current: i + 1, total: scanned.length });
+      setLookupProgress({ current: i + 1, total: barcodeList.length, label: 'Looking up barcode…' });
 
-      // Wait between requests — skip the delay after the last item.
-      if (i < scanned.length - 1 && !cancelRef.current) {
+      // Wait between OFB requests — skip after the last item.
+      if (i < barcodeList.length - 1 && !cancelRef.current) {
         await new Promise(resolve => setTimeout(resolve, OFF_DELAY_MS));
       }
     }
@@ -155,7 +176,23 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
   const handleCancelLookup = () => {
     cancelRef.current = true;
     setStep('scan');
-    setLookupProgress({ current: 0, total: 0 });
+    setLookupProgress({ current: 0, total: 0, label: '' });
+  };
+
+  // Re-run AI parse on a single review item
+  const handleReparse = async (idx: number) => {
+    const item = reviewItems[idx];
+    const raw = [item.brand, item.generic_name].filter(Boolean).join(' ') || item.generic_name;
+    if (!raw.trim()) return;
+    setReParsingIdx(idx);
+    const parsed = await aiParseName(raw);
+    if (parsed) {
+      setReviewItems(prev => prev.map((it, i) => i === idx
+        ? { ...it, generic_name: parsed.generic_name, brand: parsed.brand, aiParsed: true }
+        : it
+      ));
+    }
+    setReParsingIdx(null);
   };
 
   const updateReviewItem = (barcode: string, patch: Partial<ReviewItem>) => {
@@ -163,11 +200,18 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
   };
 
   const handleImport = async () => {
-    const toImport = reviewItems.filter(it => !it.skip && it.name.trim());
+    const toImport = reviewItems.filter(it => !it.skip && it.generic_name.trim());
     if (toImport.length === 0) return;
     setImporting(true);
     try {
-      await onImport(selectedSection, toImport.map(it => ({ name: it.name.trim(), quantity: it.qty, unit: it.unit.trim() })));
+      await onImport(selectedSection, toImport.map(it => ({
+        name: it.generic_name.trim(),
+        generic_name: it.generic_name.trim(),
+        brand: it.brand.trim(),
+        barcode: it.barcode,
+        quantity: it.qty,
+        unit: it.unit.trim(),
+      })));
       setImportedCount(toImport.length);
       setStep('done');
     } finally {
@@ -175,13 +219,12 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
     }
   };
 
-  const importable = reviewItems.filter(it => !it.skip && it.name.trim()).length;
+  const importable = reviewItems.filter(it => !it.skip && it.generic_name.trim()).length;
   const skipped = reviewItems.filter(it => it.skip).length;
-  const unnamed = reviewItems.filter(it => !it.skip && !it.name.trim()).length;
+  const unnamed = reviewItems.filter(it => !it.skip && !it.generic_name.trim()).length;
 
   const sectionName = sections.find(s => s.id === selectedSection)?.name ?? '';
 
-  const STEPS: Step[] = ['scan', 'looking', 'review', 'done'];
   const STEP_LABELS: Record<Step, string> = { scan: 'Scan', looking: 'Lookup', review: 'Review', done: 'Done' };
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -191,10 +234,11 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
       {/* Step indicators */}
       <div className="flex items-center gap-1 px-5 pt-4 pb-2">
         {(['scan', 'review', 'done'] as Step[]).map((s, i) => {
-          const idx = ['scan', 'review', 'done'].indexOf(step === 'looking' ? 'scan' : step);
-          const sIdx = i;
+          const stepOrder: Step[] = ['scan', 'review', 'done'];
+          const activeStep = step === 'looking' ? 'scan' : step;
+          const idx = stepOrder.indexOf(activeStep);
           const active = (step === 'looking' && s === 'scan') || step === s;
-          const past = sIdx < idx;
+          const past = i < idx;
           return (
             <React.Fragment key={s}>
               <div className={`flex items-center gap-1.5 text-xs font-medium ${active ? 'text-accent' : past ? 'text-emerald-400' : 'text-slate-600'}`}>
@@ -210,7 +254,6 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
       {/* ── SCAN STEP ── */}
       {step === 'scan' && (
         <div className="p-5 space-y-4">
-          {/* Section picker */}
           <div>
             <label className="text-xs text-slate-400 mb-1.5 block">Target section</label>
             <select
@@ -222,7 +265,6 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
             </select>
           </div>
 
-          {/* Barcode input — USB scanners type + Enter */}
           <div>
             <label className="text-xs text-slate-400 mb-1.5 flex items-center gap-1.5">
               <ScanLine className="w-3.5 h-3.5" /> Scan barcodes
@@ -237,29 +279,31 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
               placeholder="Point scanner here and scan items…"
               className="w-full px-3 py-2 bg-surface-raised border border-slate-600 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-accent placeholder-slate-600"
             />
-            <p className="mt-1 text-[11px] text-slate-600">USB barcode readers work automatically — each scan adds to the list below. Press Enter to add a typed barcode.</p>
+            <p className="mt-1 text-[11px] text-slate-600">USB barcode readers work automatically — each scan adds to the list below.</p>
           </div>
 
-          {/* Scanned list */}
-          {scanned.length > 0 && (
+          {Object.keys(scanned).length > 0 && (
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs text-slate-400">{scanned.length} barcode{scanned.length !== 1 ? 's' : ''} scanned</span>
-                <button onClick={() => setScanned([])} className="text-[11px] text-slate-600 hover:text-red-400">Clear all</button>
+                <span className="text-xs text-slate-400">{Object.keys(scanned).length} unique barcode{Object.keys(scanned).length !== 1 ? 's' : ''} scanned</span>
+                <button onClick={() => setScanned({})} className="text-[11px] text-slate-600 hover:text-red-400">Clear all</button>
               </div>
               <div className="max-h-44 overflow-y-auto space-y-0.5 rounded-lg border border-slate-700 bg-surface-raised p-2">
-                {scanned.map(b => (
+                {Object.entries(scanned).map(([b, count]) => (
                   <div key={b} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-700/50 group">
                     <span className="flex-1 font-mono text-xs text-slate-300">{b}</span>
+                    {count > 1 && (
+                      <span className="text-[10px] px-1.5 py-0.5 bg-accent/20 text-accent rounded font-medium">×{count}</span>
+                    )}
                     <button onClick={() => removeBarcode(b)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
                       <X className="w-3 h-3" />
                     </button>
                   </div>
                 ))}
               </div>
-              {scanned.length > 1 && (
+              {Object.keys(scanned).length > 1 && (
                 <p className="mt-1.5 text-[11px] text-slate-600">
-                  Lookup will take ~{Math.round((scanned.length * OFF_DELAY_MS) / 1000)}s (rate-limited to 15 req/min by OpenFoodFacts)
+                  Lookup takes ~{Math.round((Object.keys(scanned).length * OFF_DELAY_MS) / 1000)}s — rate-limited by OpenFoodFacts
                 </p>
               )}
             </div>
@@ -269,11 +313,11 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
             <button onClick={handleClose} className="px-3 py-1.5 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
             <button
               onClick={handleProcess}
-              disabled={scanned.length === 0 || !selectedSection}
+              disabled={Object.keys(scanned).length === 0 || !selectedSection}
               className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-accent hover:bg-accent/80 text-white rounded-lg disabled:opacity-40"
             >
               <ArrowRight className="w-4 h-4" />
-              Process {scanned.length} item{scanned.length !== 1 ? 's' : ''}
+              Process {Object.keys(scanned).length} item{Object.keys(scanned).length !== 1 ? 's' : ''}
             </button>
           </div>
         </div>
@@ -285,7 +329,7 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
           <Loader2 className="w-10 h-10 text-accent animate-spin" />
           <div className="text-center">
             <p className="text-slate-100 font-medium">
-              Looking up {lookupProgress.current} of {lookupProgress.total}…
+              {lookupProgress.label || 'Looking up…'} ({lookupProgress.current} of {lookupProgress.total})
             </p>
             <p className="text-xs text-slate-500 mt-1">
               {lookupProgress.current < lookupProgress.total
@@ -293,7 +337,6 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
                 : 'Finishing up…'}
             </p>
           </div>
-          {/* Progress bar */}
           <div className="w-full max-w-xs bg-slate-700 rounded-full h-1.5 overflow-hidden">
             <div
               className="h-full bg-accent rounded-full transition-all duration-500"
@@ -304,7 +347,7 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
             onClick={handleCancelLookup}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-500 hover:text-red-400 border border-slate-700 hover:border-red-500/40 rounded-lg transition-colors"
           >
-            <Ban className="w-3.5 h-3.5" /> Cancel lookup
+            <Ban className="w-3.5 h-3.5" /> Cancel
           </button>
         </div>
       )}
@@ -326,61 +369,83 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
           )}
 
           <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
-            {reviewItems.map(item => (
+            {reviewItems.map((item, idx) => (
               <div
                 key={item.barcode}
                 className={`rounded-lg border p-3 space-y-2 transition-opacity ${item.skip ? 'opacity-40' : ''} ${!item.found ? 'border-amber-500/40 bg-amber-500/5' : 'border-slate-700 bg-surface-raised'}`}
               >
-                <div className="flex items-start gap-2">
-                  {/* Found badge */}
-                  <span className={`mt-0.5 shrink-0 ${item.found ? 'text-emerald-400' : 'text-amber-400'}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`shrink-0 ${item.found ? 'text-emerald-400' : 'text-amber-400'}`}>
                     {item.found ? <CheckCircle className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
                   </span>
-                  <span className="font-mono text-[11px] text-slate-500 mt-0.5 shrink-0 w-28">{item.barcode}</span>
-                  {/* Name input */}
-                  <input
-                    value={item.name}
-                    onChange={e => updateReviewItem(item.barcode, { name: e.target.value })}
-                    placeholder={item.found ? '' : 'Not found — enter name manually'}
-                    disabled={item.skip}
-                    className={`flex-1 px-2 py-1 bg-surface border rounded text-sm text-slate-100 focus:outline-none focus:border-accent min-w-0 ${
-                      !item.name.trim() && !item.skip ? 'border-amber-500/60 placeholder-amber-500/50' : 'border-slate-600 placeholder-slate-600'
-                    }`}
-                  />
-                  {/* Skip toggle */}
+                  <span className="font-mono text-[11px] text-slate-600 shrink-0 w-24">{item.barcode}</span>
+                  {item.aiParsed && (
+                    <span className="text-[10px] text-violet-400 flex items-center gap-0.5 shrink-0">
+                      <Sparkles className="w-2.5 h-2.5" /> AI
+                    </span>
+                  )}
                   <button
                     onClick={() => updateReviewItem(item.barcode, { skip: !item.skip })}
-                    title={item.skip ? 'Include item' : 'Skip item'}
-                    className={`shrink-0 px-2 py-1 text-[11px] rounded border transition-colors ${
-                      item.skip
-                        ? 'border-slate-600 text-slate-500 hover:border-accent/50 hover:text-accent'
-                        : 'border-slate-600 text-slate-400 hover:border-red-500/50 hover:text-red-400'
+                    className={`ml-auto shrink-0 px-2 py-0.5 text-[11px] rounded border transition-colors ${
+                      item.skip ? 'border-slate-600 text-slate-500 hover:text-accent hover:border-accent/50' : 'border-slate-600 text-slate-400 hover:text-red-400 hover:border-red-500/50'
                     }`}
                   >
                     {item.skip ? 'Include' : 'Skip'}
                   </button>
                 </div>
-                {/* Qty + Unit */}
+
                 {!item.skip && (
-                  <div className="flex items-center gap-2 pl-[4.5rem]">
-                    <div className="flex items-center gap-1">
-                      <label className="text-[10px] text-slate-600">Qty</label>
+                  <div className="space-y-1.5 pl-6">
+                    {/* Generic name */}
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-[10px] text-slate-500 w-14 shrink-0">Item</label>
                       <input
-                        type="number"
-                        min={0}
-                        value={item.qty}
-                        onChange={e => updateReviewItem(item.barcode, { qty: Number(e.target.value) })}
-                        className="w-14 px-2 py-0.5 bg-surface border border-slate-600 rounded text-xs text-slate-200 focus:outline-none focus:border-accent"
+                        value={item.generic_name}
+                        onChange={e => updateReviewItem(item.barcode, { generic_name: e.target.value })}
+                        placeholder="e.g. Beef Hot Dog"
+                        disabled={item.skip}
+                        className={`flex-1 px-2 py-1 bg-surface border rounded text-sm text-slate-100 focus:outline-none focus:border-accent ${
+                          !item.generic_name.trim() ? 'border-amber-500/60 placeholder-amber-500/50' : 'border-slate-600 placeholder-slate-600'
+                        }`}
+                      />
+                      <button
+                        onClick={() => handleReparse(idx)}
+                        disabled={reParsingIdx === idx}
+                        title="Re-parse with AI"
+                        className="shrink-0 p-1.5 rounded border border-slate-600 text-slate-500 hover:text-violet-400 hover:border-violet-500/50 disabled:opacity-40"
+                      >
+                        {reParsingIdx === idx ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                      </button>
+                    </div>
+                    {/* Brand */}
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-[10px] text-slate-500 w-14 shrink-0">Brand</label>
+                      <input
+                        value={item.brand}
+                        onChange={e => updateReviewItem(item.barcode, { brand: e.target.value })}
+                        placeholder="optional"
+                        className="flex-1 px-2 py-1 bg-surface border border-slate-600 rounded text-sm text-slate-100 focus:outline-none focus:border-accent placeholder-slate-700"
                       />
                     </div>
-                    <div className="flex items-center gap-1">
-                      <label className="text-[10px] text-slate-600">Unit</label>
-                      <input
-                        value={item.unit}
-                        onChange={e => updateReviewItem(item.barcode, { unit: e.target.value })}
-                        placeholder="optional"
-                        className="w-20 px-2 py-0.5 bg-surface border border-slate-600 rounded text-xs text-slate-200 focus:outline-none focus:border-accent placeholder-slate-700"
-                      />
+                    {/* Qty + Unit */}
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-[10px] text-slate-500 w-14 shrink-0">Qty</label>
+                        <input
+                          type="number" min={0} value={item.qty}
+                          onChange={e => updateReviewItem(item.barcode, { qty: Number(e.target.value) })}
+                          className="w-16 px-2 py-1 bg-surface border border-slate-600 rounded text-xs text-slate-200 focus:outline-none focus:border-accent"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-[10px] text-slate-500 shrink-0">Unit</label>
+                        <input
+                          value={item.unit}
+                          onChange={e => updateReviewItem(item.barcode, { unit: e.target.value })}
+                          placeholder="optional"
+                          className="w-20 px-2 py-1 bg-surface border border-slate-600 rounded text-xs text-slate-200 focus:outline-none focus:border-accent placeholder-slate-700"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
@@ -398,7 +463,7 @@ export default function MassImportModal({ isOpen, onClose, sections, onImport }:
                 className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-accent hover:bg-accent/80 text-white rounded-lg disabled:opacity-40"
               >
                 {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                {importing ? 'Importing…' : `Import ${importable} item${importable !== 1 ? 's' : ''}${skipped > 0 ? ` (skip ${skipped})` : ''}`}
+                {importing ? 'Importing…' : `Import ${importable}${skipped > 0 ? ` (skip ${skipped})` : ''}`}
               </button>
             </div>
           </div>

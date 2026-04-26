@@ -29,13 +29,16 @@ export const pantryApi = {
     const r = await fetch(url);
     return r.json();
   },
-  createItem: async (data: { section_id: string; name: string; quantity?: number; unit?: string }): Promise<ApiResponse<PantryItem>> => {
+  createItem: async (data: {
+    section_id: string; name: string; generic_name?: string; brand?: string;
+    quantity?: number; unit?: string; min_quantity?: number; barcode?: string;
+  }): Promise<ApiResponse<PantryItem>> => {
     const r = await fetch(`${BASE}/items`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
     });
     return r.json();
   },
-  updateItem: async (id: string, data: Partial<PantryItem>): Promise<ApiResponse<PantryItem>> => {
+  updateItem: async (id: string, data: Partial<Omit<PantryItem, 'id' | 'created_at'>>): Promise<ApiResponse<PantryItem>> => {
     const r = await fetch(`${BASE}/items/${id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
     });
@@ -43,6 +46,12 @@ export const pantryApi = {
   },
   deleteItem: async (id: string): Promise<ApiResponse<null>> => {
     const r = await fetch(`${BASE}/items/${id}`, { method: 'DELETE' });
+    return r.json();
+  },
+  bulkDeleteItems: async (ids: string[]): Promise<ApiResponse<{ deleted: number }>> => {
+    const r = await fetch(`${BASE}/items/bulk-delete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+    });
     return r.json();
   },
   addToShopping: async (id: string, quantity?: number): Promise<ApiResponse<any>> => {

@@ -127,9 +127,23 @@ export default function SettingsPage() {
               </select>
           </section>
 
+          {/* OpenRouter AI */}
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold text-slate-300 border-b border-slate-700 pb-2">
+              AI — OpenRouter
+            </h2>
+            {field('API Key', 'openrouter_api_key', {
+              type: 'password',
+              hint: 'Get a free key at openrouter.ai — used to parse product names from barcode scans',
+            })}
+            {field('Model', 'openrouter_model', {
+              placeholder: 'anthropic/claude-3-haiku (default)',
+              hint: 'Any OpenRouter model ID. Leave blank to use the default.',
+            })}
+          </section>
+
           {/* Save */}
-          <div className="flex items-center gap-3 pt-2 pb-8">
-            <button
+          <div className="flex items-center gap-3 pt-2 pb-8">            <button
               type="submit"
               disabled={saving}
               className="flex items-center gap-2 px-5 py-2 bg-accent hover:bg-accent-hover text-white text-sm rounded-lg transition-colors disabled:opacity-50"

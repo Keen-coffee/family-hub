@@ -18,6 +18,7 @@ import mealplanRouter from './routes/mealplan.js';
 import openfoodfactsRouter from './routes/openfoodfacts.js';
 import tasksRouter from './routes/tasks.js';
 import babysitterRouter from './routes/babysitter.js';
+import aiRouter from './routes/ai.js';
 
 // Try loading .env from server/ subdirectory (when run from repo root)
 // or from CWD (when run from server/ directly)
@@ -55,6 +56,7 @@ app.use('/api/mealplan', mealplanRouter);
 app.use('/api/openfoodfacts', openfoodfactsRouter);
 app.use('/api/tasks', tasksRouter);
 app.use('/api/babysitter', babysitterRouter);
+app.use('/api/ai', aiRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {

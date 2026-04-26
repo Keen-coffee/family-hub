@@ -83,3 +83,13 @@ export function useAddPantryItemToShopping() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['shopping'] }),
   });
 }
+
+export function useBulkDeletePantryItems() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: pantryApi.bulkDeleteItems,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pantry', 'items'] });
+    },
+  });
+}
