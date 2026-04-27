@@ -252,6 +252,7 @@ export default function GroceryPage() {
   const [newItemName, setNewItemName] = useState('');
   const [newItemQty, setNewItemQty] = useState(1);
   const [newItemUnit, setNewItemUnit] = useState('');
+  const [newItemBarcode, setNewItemBarcode] = useState('');
 
   // Add Shopping modal
   const [showAddShopping, setShowAddShopping] = useState(false);
@@ -303,7 +304,7 @@ export default function GroceryPage() {
 
   const handleOpenAddItem = (s: PantrySection) => {
     setTargetSection(s);
-    setNewItemName(''); setNewItemQty(1); setNewItemUnit('');
+    setNewItemName(''); setNewItemQty(1); setNewItemUnit(''); setNewItemBarcode('');
     setShowAddItem(true);
   };
 
@@ -313,6 +314,7 @@ export default function GroceryPage() {
     try {
       const r = await fetch(`/api/openfoodfacts/${encodeURIComponent(barcode)}`);
       const data = await r.json();
+      if (target === 'item') setNewItemBarcode(barcode);
       if (data.success && data.data?.name) {
         const name = data.data.brand ? `${data.data.brand} ${data.data.name}` : data.data.name;
         if (target === 'item') setNewItemName(name);
@@ -346,7 +348,7 @@ export default function GroceryPage() {
 
   const handleCreateItem = () => {
     if (!targetSection || !newItemName.trim()) return;
-    createItem({ section_id: targetSection.id, name: newItemName.trim(), quantity: newItemQty, unit: newItemUnit });
+    createItem({ section_id: targetSection.id, name: newItemName.trim(), quantity: newItemQty, unit: newItemUnit, barcode: newItemBarcode });
     setShowAddItem(false);
   };
 
