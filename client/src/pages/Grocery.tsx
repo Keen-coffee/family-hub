@@ -802,13 +802,12 @@ export default function GroceryPage() {
             <input type="number" min={0} step={1} value={editForm.min_quantity} onChange={e => setEditForm(f => ({ ...f, min_quantity: Math.max(0, Math.floor(Number(e.target.value))) }))}
               className="w-full px-3 py-2 bg-surface-raised border border-slate-600 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-accent" />
           </div>
-          {editForm.barcode && (
-            <div>
-              <label className="text-xs text-slate-400 mb-1 block">Barcode (UPC)</label>
-              <input value={editForm.barcode} onChange={e => setEditForm(f => ({ ...f, barcode: e.target.value }))}
-                className="w-full px-3 py-2 bg-surface-raised border border-slate-600 rounded-lg text-sm text-slate-100 font-mono focus:outline-none focus:border-accent" />
-            </div>
-          )}
+          <div>
+            <label className="text-xs text-slate-400 mb-1 block">Barcode (UPC)</label>
+            <input value={editForm.barcode} onChange={e => setEditForm(f => ({ ...f, barcode: e.target.value }))}
+              placeholder="optional"
+              className="w-full px-3 py-2 bg-surface-raised border border-slate-600 rounded-lg text-sm text-slate-100 font-mono focus:outline-none focus:border-accent" />
+          </div>
           <div>
             <label className="text-xs text-slate-400 mb-1 block">Section</label>
             <select value={editForm.section_id} onChange={e => setEditForm(f => ({ ...f, section_id: e.target.value }))}

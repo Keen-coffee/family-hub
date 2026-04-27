@@ -1,14 +1,14 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Calendar, ShoppingCart, CheckSquare, Baby } from 'lucide-react';
+import { LayoutDashboard, Calendar, ShoppingCart, CheckSquare, UtensilsCrossed } from 'lucide-react';
 import clsx from 'clsx';
 
 const ITEMS = [
-  { to: '/',           icon: LayoutDashboard, label: 'Home' },
-  { to: '/calendar',   icon: Calendar,        label: 'Calendar' },
-  { to: '/grocery',    icon: ShoppingCart,    label: 'Grocery' },
-  { to: '/chores',     icon: CheckSquare,     label: 'Chores' },
-  { to: '/babysitter', icon: Baby,            label: 'Sitter' },
+  { to: '/',         icon: LayoutDashboard,  label: 'Home' },
+  { to: '/calendar', icon: Calendar,         label: 'Calendar' },
+  { to: '/grocery',  icon: ShoppingCart,     label: 'Grocery' },
+  { to: '/chores',   icon: CheckSquare,      label: 'Chores' },
+  { to: '/recipes',  icon: UtensilsCrossed,  label: 'Recipes' },
 ];
 
 export default function MobileNav() {
