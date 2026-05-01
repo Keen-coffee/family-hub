@@ -194,22 +194,24 @@ function buildVEvent(data: {
 }): string {
   const uid = data.uid ?? uuidv4();
   const now = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15) + 'Z';
-  // Normalize to full ISO (datetime-local inputs omit seconds: "2026-04-19T14:00")
-  const toISO = (s: string) => {
-    const padded = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s) ? s + ':00' : s;
-    return new Date(padded).toISOString();
-  };
-  const fmt = (iso: string, allDay: boolean) =>
-    allDay ? iso.slice(0, 10).replace(/-/g, '') : toISO(iso).replace(/[-:.]/g, '').slice(0, 15) + 'Z';
+  // Pad datetime-local strings that omit seconds: "2026-04-19T14:00" → "2026-04-19T14:00:00"
+  const pad = (s: string) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s) ? s + ':00' : s;
+  // Parse as UTC to avoid server-timezone effects on date arithmetic (append Z to force UTC)
+  const toMs = (s: string) => new Date(pad(s) + (s.includes('T') ? 'Z' : '')).getTime();
+  // Format as iCal floating datetime (YYYYMMDDTHHMMSS, no Z) so calendar clients use local timezone
+  const fmtFloat = (s: string) => pad(s).replace(/[-:]/g, '').slice(0, 15);
+  const fmt = (s: string, allDay: boolean) =>
+    allDay ? s.slice(0, 10).replace(/-/g, '') : fmtFloat(s);
   const allDay = data.allDay ?? false;
 
   // For all-day events DTEND must be exclusive next-day; for timed events DTEND must be after DTSTART
-  const startMs = new Date(allDay ? data.start.slice(0, 10) : toISO(data.start)).getTime();
-  let endMs = new Date(allDay ? (data.end ?? data.start).slice(0, 10) : toISO(data.end ?? data.start)).getTime();
+  const startMs = toMs(allDay ? data.start.slice(0, 10) : data.start);
+  let endMs = toMs(allDay ? (data.end ?? data.start).slice(0, 10) : (data.end ?? data.start));
   if (allDay && endMs <= startMs) endMs = startMs + 86400000; // next day
   if (!allDay && endMs <= startMs) endMs = startMs + 3600000; // +1 hour
-  const endIso = new Date(endMs).toISOString();
-  const endDate = endIso.slice(0, 10); // YYYY-MM-DD for all-day
+  // Convert back to floating-time string (treat UTC result as local by dropping Z)
+  const endLocal = new Date(endMs).toISOString().slice(0, allDay ? 10 : 19);
+  const endDate = endLocal.slice(0, 10); // YYYY-MM-DD for all-day
 
   const lines = [
     'BEGIN:VCALENDAR',
@@ -219,7 +221,7 @@ function buildVEvent(data: {
     `UID:${uid}`,
     `DTSTAMP:${now}`,
     allDay ? `DTSTART;VALUE=DATE:${fmt(data.start, true)}` : `DTSTART:${fmt(data.start, false)}`,
-    allDay ? `DTEND;VALUE=DATE:${endDate.replace(/-/g, '')}` : `DTEND:${endIso.replace(/[-:.]/g, '').slice(0, 15) + 'Z'}`,
+    allDay ? `DTEND;VALUE=DATE:${endDate.replace(/-/g, '')}` : `DTEND:${fmtFloat(endLocal)}`,
     `SUMMARY:${data.summary}`,
     data.rrule ? `RRULE:${data.rrule}` : '',
     data.description ? `DESCRIPTION:${data.description.replace(/\n/g, '\\n')}` : '',
