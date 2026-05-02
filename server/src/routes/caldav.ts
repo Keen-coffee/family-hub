@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { XMLParser } from 'fast-xml-parser';
-import ICAL from 'ical.js';
+import ICAL, { Time as ICALTime } from 'ical.js';
 import { v4 as uuidv4 } from 'uuid';
 import { getSetting } from './settings.js';
 
@@ -82,7 +82,7 @@ function parseCalendarObjects(xml: string): { href: string; etag: string; data: 
 // - UTC time → ISO with "Z"             (already UTC, client shifts correctly)
 // - TZID time → ISO with "Z"            (convert to UTC via toJSDate)
 // - Floating time (no zone) → "YYYY-MM-DDTHH:mm:ss" without "Z" (client treats as local)
-function icalTimeToISOString(t: ICAL.Time): string {
+function icalTimeToISOString(t: ICALTime): string {
   if (t.isDate) {
     return `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
   }
