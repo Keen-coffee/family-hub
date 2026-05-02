@@ -3,6 +3,7 @@ import { Settings, Save, RefreshCw, MapPin } from 'lucide-react';
 import { settingsApi } from '../api/settings';
 import { useSettingsStore } from '../stores/settingsStore';
 import LoadingSpinner from '../components/common/LoadingSpinner';
+import api from '../api/client';
 import type { AppSettings } from '../types';
 
 export default function SettingsPage() {
@@ -10,6 +11,7 @@ export default function SettingsPage() {
   const [form, setForm] = useState<AppSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [version, setVersion] = useState<string | null>(null);
 
   // Always load from server on mount — don't trust stale Zustand cache for the form
   useEffect(() => {
@@ -19,10 +21,11 @@ export default function SettingsPage() {
         setForm(merged);
         setSettings(merged);
       } else {
-        // Server unreachable — fall back to store so page isn't blank forever
         setForm(settings);
       }
     }).catch(() => setForm(settings));
+
+    api.get<{ version: string }>('/version').then(r => setVersion(r.data.version)).catch(() => {});
   }, []);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -153,6 +156,15 @@ export default function SettingsPage() {
             </button>
             {saved && <span className="text-xs text-emerald-400">Settings saved ✓</span>}
           </div>
+
+          {/* Version */}
+          {version && (
+            <div className="pb-6 text-center">
+              <span className="text-[10px] text-slate-600 font-mono">
+                version: {version}
+              </span>
+            </div>
+          )}
         </div>
       </form>}
     </div>

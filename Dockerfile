@@ -17,5 +17,7 @@ COPY --from=builder /app/server/package*.json ./server/
 RUN cd server && npm install --omit=dev
 RUN mkdir -p /app/data
 ENV NODE_ENV=production
+ARG COMMIT_SHA=unknown
+ENV COMMIT_SHA=$COMMIT_SHA
 EXPOSE 3001
 CMD ["node", "server/dist/index.js"]

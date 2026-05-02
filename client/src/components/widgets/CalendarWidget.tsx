@@ -1,5 +1,5 @@
 import React from 'react';
-import { format, isToday, isTomorrow, startOfDay, addDays } from 'date-fns';
+import { format, isToday, isTomorrow, startOfDay, addDays, parseISO } from 'date-fns';
 import { Calendar, Star } from 'lucide-react';
 import { useCalendarEvents } from '../../hooks/useCalendar';
 import { getUSHolidays } from '../../utils/usHolidays';
@@ -59,8 +59,8 @@ export default function CalendarWidget() {
   // Group upcoming events by day
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const upcoming = [...events]
-    .filter(e => new Date(e.end) >= startOfDay(new Date()) && new Date(e.start) <= cutoff)
-    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+    .filter(e => parseISO(e.end) >= startOfDay(new Date()) && parseISO(e.start) <= cutoff)
+    .sort((a, b) => parseISO(a.start).getTime() - parseISO(b.start).getTime())
     .slice(0, maxEvents);
 
   // Merge upcoming holidays (within daysAhead) into display
@@ -72,8 +72,7 @@ export default function CalendarWidget() {
   const dayMap = new Map<string, DayEntry>();
 
   upcoming.forEach(ev => {
-    const d = new Date(ev.start);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const key = format(parseISO(ev.start), 'yyyy-MM-dd');
     if (!dayMap.has(key)) dayMap.set(key, { events: [], holidays: [] });
     dayMap.get(key)!.events.push(ev);
   });
@@ -116,7 +115,7 @@ export default function CalendarWidget() {
                     <p className="text-xs font-medium text-slate-200 truncate">{ev.summary}</p>
                     {!ev.allDay && (
                       <p className="text-[10px] text-slate-500">
-                        {format(new Date(ev.start), 'h:mm a')} – {format(new Date(ev.end), 'h:mm a')}
+                        {format(parseISO(ev.start), 'h:mm a')} – {format(parseISO(ev.end), 'h:mm a')}
                       </p>
                     )}
                   </div>

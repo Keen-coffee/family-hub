@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   format, addDays, startOfWeek, endOfWeek, eachDayOfInterval, isToday,
 } from 'date-fns';
@@ -55,6 +55,17 @@ export default function MealsPage() {
   const [recipeSearch, setRecipeSearch] = useState('');
 
   const [checkResult, setCheckResult] = useState<{ added: string[]; alreadyHave: string[] } | null>(null);
+
+  // Reset to the current week when the tab regains focus, but not while adding a meal
+  useEffect(() => {
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible' && !showAdd) {
+        setWeekStart(startOfWeek(new Date(), { weekStartsOn: 0 }));
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisible);
+    return () => document.removeEventListener('visibilitychange', handleVisible);
+  }, [showAdd]);
 
   const mealsForDay = (day: Date) =>
     entries

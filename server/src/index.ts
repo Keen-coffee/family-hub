@@ -63,6 +63,11 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Version info
+app.get('/api/version', (_req, res) => {
+  res.json({ version: process.env.COMMIT_SHA ?? 'unknown' });
+});
+
 // Global error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('[Unhandled Error]', err);

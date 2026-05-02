@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth,
   isSameDay, addMonths, subMonths, parseISO, isToday,
@@ -69,6 +69,19 @@ export default function CalendarPage() {
   const [selectedEvent, setSelectedEvent] = useState<CalDAVEvent | null>(null);
 
   const [createError, setCreateError] = useState<string | null>(null);
+
+  // Reset to today when the tab regains focus, but not while a form or event detail is open
+  useEffect(() => {
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible' && !showForm && !selectedEvent) {
+        const today = new Date();
+        setCurrentMonth(today);
+        setSelectedDay(today);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisible);
+    return () => document.removeEventListener('visibilitychange', handleVisible);
+  }, [showForm, selectedEvent]);
 
   const start = startOfMonth(currentMonth);
   const end = endOfMonth(currentMonth);

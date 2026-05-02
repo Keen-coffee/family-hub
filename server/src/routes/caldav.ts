@@ -77,6 +77,27 @@ function parseCalendarObjects(xml: string): { href: string; etag: string; data: 
     });
 }
 
+// Convert an ICAL.Time to an ISO string that the client will interpret correctly:
+// - All-day (date-only) → "YYYY-MM-DD"  (date-fns parseISO treats this as local)
+// - UTC time → ISO with "Z"             (already UTC, client shifts correctly)
+// - TZID time → ISO with "Z"            (convert to UTC via toJSDate)
+// - Floating time (no zone) → "YYYY-MM-DDTHH:mm:ss" without "Z" (client treats as local)
+function icalTimeToISOString(t: ICAL.Time): string {
+  if (t.isDate) {
+    return `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ICALany = ICAL as any;
+  const isUtc = t.zone === ICALany.Timezone.utcTimezone;
+  const isFloating = !t.zone || t.zone === ICALany.Timezone.localTimezone;
+  if (!isFloating || isUtc) {
+    // UTC or real TZID — convert to proper UTC ISO string
+    return t.toJSDate().toISOString();
+  }
+  // Floating time — return without Z so the client treats it as local time
+  return `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}T${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}:${String(t.second).padStart(2, '0')}`;
+}
+
 function parseICalEvent(icalStr: string): Record<string, unknown> | null {
   try {
     const jcal = ICAL.parse(icalStr);
@@ -89,8 +110,8 @@ function parseICalEvent(icalStr: string): Record<string, unknown> | null {
       summary: ev.summary,
       description: ev.description,
       location: ev.location,
-      start: ev.startDate?.toJSDate()?.toISOString(),
-      end: ev.endDate?.toJSDate()?.toISOString(),
+      start: ev.startDate ? icalTimeToISOString(ev.startDate) : undefined,
+      end: ev.endDate ? icalTimeToISOString(ev.endDate) : undefined,
       allDay: ev.startDate?.isDate ?? false,
       color: vevent.getFirstPropertyValue('x-family-hub-color') ?? undefined,
       icalString: icalStr,
@@ -123,7 +144,7 @@ function parseAndExpandEvents(
     };
 
     if (!ev.isRecurring()) {
-      return [{ ...base, start: ev.startDate?.toJSDate()?.toISOString(), end: ev.endDate?.toJSDate()?.toISOString() }];
+      return [{ ...base, start: ev.startDate ? icalTimeToISOString(ev.startDate) : undefined, end: ev.endDate ? icalTimeToISOString(ev.endDate) : undefined }];
     }
 
     // Expand recurring occurrences within the requested range
@@ -147,8 +168,8 @@ function parseAndExpandEvents(
           ...base,
           uid: `${ev.uid}_${next.toString()}`,
           summary: details.item.summary || ev.summary,
-          start: details.startDate.toJSDate().toISOString(),
-          end: details.endDate.toJSDate().toISOString(),
+          start: icalTimeToISOString(details.startDate),
+          end: icalTimeToISOString(details.endDate),
         });
       }
     }
