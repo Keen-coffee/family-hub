@@ -11,6 +11,7 @@ import ChoresPage from './pages/Chores';
 import TasksPage from './pages/Tasks';
 import SettingsPage from './pages/Settings';
 import BabysitterPage from './pages/Babysitter';
+import { usePrefetchAll } from './hooks/usePrefetchAll';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,24 +23,31 @@ const queryClient = new QueryClient({
   },
 });
 
+function AppRoutes() {
+  usePrefetchAll();
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route element={<AppLayout />}>
+          <Route index element={<Dashboard />} />
+          <Route path="calendar" element={<CalendarPage />} />
+          <Route path="meals" element={<MealsPage />} />
+          <Route path="grocery" element={<GroceryPage />} />
+          <Route path="recipes" element={<RecipesPage />} />
+          <Route path="chores" element={<ChoresPage />} />
+          <Route path="tasks" element={<TasksPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="babysitter" element={<BabysitterPage />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="calendar" element={<CalendarPage />} />
-            <Route path="meals" element={<MealsPage />} />
-            <Route path="grocery" element={<GroceryPage />} />
-            <Route path="recipes" element={<RecipesPage />} />
-            <Route path="chores" element={<ChoresPage />} />
-            <Route path="tasks" element={<TasksPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-            <Route path="babysitter" element={<BabysitterPage />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <AppRoutes />
     </QueryClientProvider>
   );
 }
