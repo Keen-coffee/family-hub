@@ -32,7 +32,18 @@ export function useUpdateChore() {
   return useMutation({
     mutationFn: (todo: Pick<CalDAVTodo, 'href' | 'etag'> & Partial<CalDAVTodo>) =>
       caldavApi.updateTodo(todo),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['chores'] }),
+    onMutate: async (todo) => {
+      await qc.cancelQueries({ queryKey: ['chores'] });
+      const snapshots = qc.getQueriesData<{ data?: CalDAVTodo[] }>({ queryKey: ['chores'] });
+      qc.setQueriesData<{ data?: CalDAVTodo[] }>({ queryKey: ['chores'] }, (old) =>
+        old ? { ...old, data: (old.data ?? []).map(t => t.href === todo.href ? { ...t, ...todo } : t) } : old,
+      );
+      return { snapshots };
+    },
+    onError: (_err, _vars, ctx) => {
+      ctx?.snapshots.forEach(([key, val]) => qc.setQueryData(key, val));
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['chores'] }),
   });
 }
 
@@ -40,6 +51,17 @@ export function useDeleteChore() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (href: string) => caldavApi.deleteTodo(href),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['chores'] }),
+    onMutate: async (href) => {
+      await qc.cancelQueries({ queryKey: ['chores'] });
+      const snapshots = qc.getQueriesData<{ data?: CalDAVTodo[] }>({ queryKey: ['chores'] });
+      qc.setQueriesData<{ data?: CalDAVTodo[] }>({ queryKey: ['chores'] }, (old) =>
+        old ? { ...old, data: (old.data ?? []).filter(t => t.href !== href) } : old,
+      );
+      return { snapshots };
+    },
+    onError: (_err, _vars, ctx) => {
+      ctx?.snapshots.forEach(([key, val]) => qc.setQueryData(key, val));
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['chores'] }),
   });
 }

@@ -63,7 +63,18 @@ export function useUpdatePantryItem() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<PantryItem> }) =>
       pantryApi.updateItem(id, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['pantry', 'items'] }),
+    onMutate: async ({ id, data }) => {
+      await qc.cancelQueries({ queryKey: ['pantry', 'items'] });
+      const snapshots = qc.getQueriesData<PantryItem[]>({ queryKey: ['pantry', 'items'] });
+      qc.setQueriesData<PantryItem[]>({ queryKey: ['pantry', 'items'] }, (old = []) =>
+        old.map(item => (item.id === id ? { ...item, ...data } : item)),
+      );
+      return { snapshots };
+    },
+    onError: (_err, _vars, ctx) => {
+      ctx?.snapshots.forEach(([key, val]) => qc.setQueryData(key, val));
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['pantry', 'items'] }),
   });
 }
 
@@ -71,7 +82,18 @@ export function useDeletePantryItem() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: pantryApi.deleteItem,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['pantry', 'items'] }),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ['pantry', 'items'] });
+      const snapshots = qc.getQueriesData<PantryItem[]>({ queryKey: ['pantry', 'items'] });
+      qc.setQueriesData<PantryItem[]>({ queryKey: ['pantry', 'items'] }, (old = []) =>
+        old.filter(item => item.id !== id),
+      );
+      return { snapshots };
+    },
+    onError: (_err, _vars, ctx) => {
+      ctx?.snapshots.forEach(([key, val]) => qc.setQueryData(key, val));
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['pantry', 'items'] }),
   });
 }
 
